@@ -75,6 +75,8 @@ just don't commit the result.
 
 ## A note on performance
 
-`cl` deliberately never reads a transcript in full, and deliberately has no
+Claude uses bounded transcript windows; Codex streams complete rollout records
+to keep late prompts and recent metadata discoverable. Neither scanner uses a
 cache. If you change how transcripts are read, run the benchmark before and
-after; the whole store should stay well under 100ms.
+after. Keep the Claude store well under 100ms; for Codex, compare throughput and
+allocations with `go test ./internal/scan -run '^$' -bench BenchmarkCodexLargeRollout`.
