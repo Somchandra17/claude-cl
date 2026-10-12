@@ -7,15 +7,10 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"regexp"
+	"runtime"
 	"sort"
 	"strings"
-)
-
-var (
-	markSessionMeta  = []byte(`"session_meta"`)
-	markResponseItem = []byte(`"response_item"`)
-	markTurnContext  = []byte(`"turn_context"`)
+	"sync"
 )
 
 // Codex lists Codex CLI rollouts under root (~/.codex/sessions).
@@ -43,9 +38,28 @@ func Codex(root string) ([]Session, error) {
 		return nil, err
 	}
 
+	parsed := make([]Session, len(paths))
+	work := make(chan int)
+	var wg sync.WaitGroup
+	for range min(4, runtime.GOMAXPROCS(0), len(paths)) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range work {
+				if s, ok := codexOne(paths[i]); ok {
+					parsed[i] = s
+				}
+			}
+		}()
+	}
+	for i := range paths {
+		work <- i
+	}
+	close(work)
+	wg.Wait()
 	out := make([]Session, 0, len(paths))
-	for _, p := range paths {
-		if s, ok := codexOne(p); ok {
+	for _, s := range parsed {
+		if s.ID != "" {
 			out = append(out, s)
 		}
 	}
@@ -102,15 +116,16 @@ type codexMeta struct {
 type codexRecord struct {
 	Type    string `json:"type"`
 	Payload struct {
-		ID       string          `json:"id"`
-		Cwd      string          `json:"cwd"`
-		Type     string          `json:"type"`
-		Role     string          `json:"role"`
-		Model    string          `json:"model"`
-		ParentID string          `json:"forked_from_id"`
-		Source   json.RawMessage `json:"source"`
-		Content  json.RawMessage `json:"content"`
-		Git      struct {
+		ID         string          `json:"id"`
+		Cwd        string          `json:"cwd"`
+		Type       string          `json:"type"`
+		Role       string          `json:"role"`
+		Model      string          `json:"model"`
+		ParentID   string          `json:"forked_from_id"`
+		Originator string          `json:"originator"`
+		Source     json.RawMessage `json:"source"`
+		Content    json.RawMessage `json:"content"`
+		Git        struct {
 			Branch string `json:"branch"`
 		} `json:"git"`
 	} `json:"payload"`
@@ -122,10 +137,17 @@ func readCodex(f io.Reader) (codexMeta, error) {
 	reader := bufio.NewReaderSize(f, 64<<10)
 	var record []byte
 	var parser codexParser
+	var discard bool
+	var kind string
 	for {
 		fragment, err := reader.ReadSlice('\n')
+		if len(record) == 0 && !discard {
+			kind, discard = codexDiscard(fragment, parser.seenMeta)
+		}
 		if err == bufio.ErrBufferFull {
-			record = append(record, fragment...)
+			if !discard {
+				record = append(record, fragment...)
+			}
 			continue
 		}
 		line := fragment
@@ -133,8 +155,11 @@ func readCodex(f io.Reader) (codexMeta, error) {
 			record = append(record, fragment...)
 			line = record
 		}
-		parser.consume(line)
+		if !discard || !parser.seenMeta {
+			parser.consume(line, kind)
+		}
 		record = record[:0]
+		discard = false
 		if parser.meta.Hidden {
 			return parser.meta, nil
 		}
@@ -157,25 +182,46 @@ type codexParser struct {
 	seenMeta    bool
 	candidates  []string
 	legacyModel string
+	originator  string
 }
 
-func (p *codexParser) consume(line []byte) {
-	if !bytes.Contains(line, markSessionMeta) && !bytes.Contains(line, markResponseItem) && !bytes.Contains(line, markTurnContext) {
+func (p *codexParser) consume(line []byte, kind string) {
+	firstMeta := !p.seenMeta
+	if firstMeta && len(bytes.TrimSpace(line)) == 0 {
 		return
 	}
+	// A key may follow a large value, beyond the first fragment. Recheck the
+	// complete record rather than guessing from marker text inside its content.
+	if kind == "" {
+		var discard bool
+		kind, discard = codexDiscard(line, p.seenMeta)
+		if discard {
+			if firstMeta {
+				p.meta.Hidden = true
+			}
+			return
+		}
+	}
+	if firstMeta {
+		p.seenMeta = true
+	}
 	r, ok := decodeCodex(line)
-	if !ok {
-		return // an active rollout may end with an incomplete record
+	if !ok || (firstMeta && r.Type != "session_meta") {
+		if firstMeta {
+			p.meta.Hidden = true // inherited history cannot repair the fork's identity
+		}
+		return // an active rollout may end with an incomplete non-header record
 	}
 	switch r.Type {
 	case "session_meta":
-		if p.seenMeta {
+		if p.seenMeta && !firstMeta {
 			return // inherited history may contain another session's header
 		}
 		p.seenMeta = true
 		p.meta.ID, p.meta.Cwd = r.Payload.ID, r.Payload.Cwd
 		p.meta.Branch, p.meta.ParentID = r.Payload.Git.Branch, r.Payload.ParentID
 		p.meta.Hidden = codexNonUserSource(r.Payload.Source)
+		p.originator = r.Payload.Originator
 	case "turn_context":
 		if r.Payload.Model != "" {
 			p.meta.Model = r.Payload.Model
@@ -193,6 +239,10 @@ func (p *codexParser) consume(line []byte) {
 		raw := codexText(r.Payload.Content)
 		var text string
 		if r.Payload.Role == "user" {
+			if p.originator == "paseo" && len(p.candidates) == 0 && codexTitleGeneration(raw) {
+				p.meta.Hidden = true
+				return
+			}
 			text = codexPrompt(raw)
 			if text != "" && len(p.candidates) < titleCandidates {
 				p.candidates = append(p.candidates, text)
@@ -250,45 +300,6 @@ func codexText(raw json.RawMessage) string {
 		}
 	}
 	return b.String()
-}
-
-// Leading context is classified before display markup is stripped. Inline tag
-// references and unknown wrappers may contain a real request and stay intact.
-var codexContextBlocks = func() []*regexp.Regexp {
-	names := []string{
-		"environment_context", "user_instructions", "permissions instructions",
-		"external_codex_apps_open_page", "external_codex_apps_context",
-		"workspace_context", "turn_aborted", "skills_instructions", "skill",
-	}
-	var patterns []*regexp.Regexp
-	for _, name := range names {
-		patterns = append(patterns, regexp.MustCompile(`(?s)^<`+name+`(?:\s[^>]*)?>.*?</`+name+`>`))
-	}
-	return patterns
-}()
-
-func codexPrompt(raw string) string {
-	text := strings.TrimSpace(raw)
-	for {
-		header, _, multiline := strings.Cut(text, "\n")
-		header = strings.TrimSpace(header)
-		if header == "# AGENTS.md instructions" || header == "AGENTS.md instructions" ||
-			(multiline && strings.HasPrefix(header, "# AGENTS.md instructions for ")) {
-			return ""
-		}
-		stripped := false
-		for _, pattern := range codexContextBlocks {
-			if span := pattern.FindStringIndex(text); span != nil {
-				text = strings.TrimSpace(text[span[1]:])
-				stripped = true
-				break
-			}
-		}
-		if !stripped {
-			break
-		}
-	}
-	return codexDisplayText(text)
 }
 
 func codexDisplayText(text string) string {

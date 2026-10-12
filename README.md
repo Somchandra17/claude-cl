@@ -155,7 +155,9 @@ of every transcript and screens lines with a byte scan before parsing any JSON.
 
 Codex streams complete rollout records so large startup instructions and long
 turns cannot hide sessions or their recent model and working directory. It keeps
-only one record and the display metadata in memory. Startup time therefore
+one relevant record and the display metadata per worker in memory. A small
+worker pool scans files concurrently and drains irrelevant tool records without
+buffering or decoding their contents. Startup time therefore
 depends on the total size of your Codex store; there is no fixed scan cutoff or
 cache.
 

@@ -74,3 +74,48 @@ func BenchmarkLiveScan(b *testing.B) {
 		}
 	}
 }
+
+// Codex live checks are opt-in: full-store I/O depends on the user's store size.
+// Only aggregate counts and timing are printed, never private prompt text.
+func liveCodexRoot(t testing.TB) string {
+	root := os.Getenv("CL_CODEX_SCAN_ROOT")
+	if root == "" {
+		t.Skip("set CL_CODEX_SCAN_ROOT to a Codex sessions directory")
+	}
+	if _, err := os.Stat(root); err != nil {
+		t.Fatalf("Codex store: %v", err)
+	}
+	return root
+}
+
+func TestLiveCodexScan(t *testing.T) {
+	root := liveCodexRoot(t)
+	start := time.Now()
+	sessions, err := Codex(root)
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var withModel int
+	for _, s := range sessions {
+		if s.ID == "" || s.Cwd == "" || s.Title == "" {
+			t.Error("listed an incomplete Codex session")
+		}
+		if s.Model != "" {
+			withModel++
+		}
+	}
+	t.Logf("%d Codex sessions in %v (with-model=%d)", len(sessions), elapsed, withModel)
+	if elapsed > 500*time.Millisecond {
+		t.Errorf("Codex scan took %v, exceeding the 500ms interactive budget", elapsed)
+	}
+}
+
+func BenchmarkLiveCodexScan(b *testing.B) {
+	root := liveCodexRoot(b)
+	for b.Loop() {
+		if _, err := Codex(root); err != nil {
+			b.Fatal(err)
+		}
+	}
+}

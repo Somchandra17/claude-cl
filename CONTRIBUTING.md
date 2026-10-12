@@ -56,6 +56,18 @@ go test ./internal/ui   -run TestLiveRender -v        # print a real frame
 go test ./internal/scan -bench BenchmarkLiveScan      # scan speed on your store
 ```
 
+Codex checks are opt-in and print only counts/timing:
+
+```sh
+CL_CODEX_SCAN_ROOT="$HOME/.codex/sessions" go test ./internal/scan -run '^TestLiveCodexScan$' -v
+CL_CODEX_SCAN_ROOT="$HOME/.codex/sessions" go test ./internal/scan -run '^$' -bench '^BenchmarkLiveCodexScan$'
+go test ./internal/scan -run '^$' -bench '^BenchmarkCodexToolStore$|^BenchmarkCodexHugeIgnoredRecord$' -benchmem
+```
+
+The synthetic Codex store uses 47 rollouts and about 363 MB of tool/reasoning
+records. Keep real-store title checks separate; synthetic throughput alone does
+not establish discovery or title correctness.
+
 ## Regenerating the README images
 
 The README hero shots (`docs/demo.png`, `docs/search.png`) are screenshots of

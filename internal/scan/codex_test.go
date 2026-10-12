@@ -233,7 +233,7 @@ func TestCodexLiteralContextTagsInHumanRequests(t *testing.T) {
 }
 
 func TestCodexWhitespaceAndMalformedRecords(t *testing.T) {
-	body := "not json\n" + `{ "type" : "session_meta", "payload" : { "id" : "spaced", "cwd" : "/repo" } }` + "\n"
+	body := "\n " + `{ "type" : "session_meta", "payload" : { "id" : "spaced", "cwd" : "/repo" } }` + "\nnot json\n"
 	body += `{ "type" : "response_item", "payload" : { "type" : "message", "role" : "user", "content" : "find this session with spaced JSON fields" } }` + "\n"
 	sessions := codexTestScan(t, body)
 	if len(sessions) != 1 || sessions[0].ID != "spaced" {
