@@ -58,6 +58,26 @@ Measured alternatives:
 Sessions with no human turn, or with no resolvable working directory, are
 omitted — there is nothing in them to resume.
 
+#### Codex rollouts
+
+Codex streams complete records through its own reader rather than using the
+Claude head/tail windows. A human prompt or recent turn context may be several
+megabytes from either end; completeness takes priority over a fixed scan budget.
+Memory holds one record and the extracted display metadata, not the whole
+rollout. The reader still uses a byte prefilter before decoding relevant JSON.
+
+The first session metadata record owns identity, branch, fork parent, and
+source. Later inherited headers cannot replace it. Known subagent and internal
+sources are excluded from the picker. The latest usable turn context supplies
+model and working directory; older message-model fields are a compatibility
+fallback. Only the opening prompt candidates and recent preview turns are kept.
+
+Complete known context blocks at the start of a message are removed before
+display markup is stripped, including injected skill manuals. Real requests
+mixed with leading context or containing literal inline tags are preserved.
+Malformed records and an incomplete final write are ignored. Claude's bounded
+scanner and the no-cache policy are unchanged.
+
 ### Titles
 
 `ai-title` when present, marked with a `·`. Otherwise the opening prompt,

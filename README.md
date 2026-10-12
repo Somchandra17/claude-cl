@@ -146,12 +146,18 @@ tens of megabytes.
 
 ## It's fast
 
-Transcripts get big: on the machine this was built on, 149 sessions came to
-277MB, the largest single file 63MB. Reading all of that to draw a list would
+Claude transcripts get big: on the machine this was built on, 149 sessions came
+to 277MB, the largest single file 63MB. Reading all of that to draw a list would
 take a quarter of a second, so `cl` doesn't. It reads a 64KB window at each end
 of every transcript and screens lines with a byte scan before parsing any JSON.
 
-**The whole store is read in about 40ms**, with no cache to fall out of date.
+**That Claude store is read in about 40ms**, with no cache to fall out of date.
+
+Codex streams complete rollout records so large startup instructions and long
+turns cannot hide sessions or their recent model and working directory. It keeps
+only one record and the display metadata in memory. Startup time therefore
+depends on the total size of your Codex store; there is no fixed scan cutoff or
+cache.
 
 ## Troubleshooting
 
