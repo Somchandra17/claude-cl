@@ -19,6 +19,7 @@ func TestCodexInjectedUserTurns(t *testing.T) {
 	}{
 		{"short acknowledgement", []string{"hi", request}, request},
 		{"status before request", []string{`{"agent_path":"019d-test","status":{"completed":"I have completed the requested implementation and checked the new behavior across all relevant session workflows."}}`, request}, request},
+		{"wrapped status before request", []string{"<subagent_notification>\n{\"agent_path\":\"019d-test\",\"status\":{\"completed\":\"I have completed the requested implementation and checked the new behavior across all relevant session workflows.\"}}\n</subagent_notification>", request}, request},
 		{"plugin boilerplate", []string{"Here is a list of plugins that are available but not installed.\n- GitHub\n- Gmail", request}, request},
 		{"trailing environment", []string{request + "\n<environment_context>Current directory: /repo; shell: zsh</environment_context>"}, request},
 		{"leading agents and request", []string{"# AGENTS.md instructions for /repo\nFollow repository instructions.\n\n## User request\n" + request}, request},

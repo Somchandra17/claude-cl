@@ -18,7 +18,7 @@ var codexContextBlocks = func() []codexContextBlock {
 		"environment_context", "user_instructions", "permissions instructions",
 		"external_codex_apps_open_page", "external_codex_apps_context",
 		"workspace_context", "turn_aborted", "skills_instructions", "skill",
-		"recommended_plugins", "user_shell_command", "task-notification",
+		"recommended_plugins", "user_shell_command", "task-notification", "subagent_notification",
 	}
 	var blocks []codexContextBlock
 	for _, name := range names {
